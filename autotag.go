@@ -111,6 +111,9 @@ type GitRepoConfig struct {
 
 	// Prefix prepends literal 'v' to the tag, eg: v1.0.0. Enabled by default
 	Prefix bool
+
+	// VersionPrefix is an optional string as a prefix to the version to easy distinguish of old version support
+	VersionPrefix string
 }
 
 // GitRepo represents a repository we want to run actions against
@@ -129,7 +132,8 @@ type GitRepo struct {
 
 	scheme string
 
-	prefix bool
+	prefix        bool
+	versionPrefix string
 }
 
 // NewRepo is a constructor for a repo object, parsing the tags that exist
@@ -162,7 +166,9 @@ func NewRepo(cfg GitRepoConfig) (*GitRepo, error) {
 		buildMetadata:             cfg.BuildMetadata,
 		scheme:                    cfg.Scheme,
 		prefix:                    cfg.Prefix,
+		versionPrefix:             cfg.VersionPrefix,
 	}
+	versionRex = regexp.MustCompile(fmt.Sprintf("^%s?([\\d]+\\.?.*)", r.versionPrefix))
 
 	err = r.parseTags()
 	if err != nil {
@@ -417,8 +423,7 @@ func (r *GitRepo) AutoTag() error {
 }
 
 func (r *GitRepo) tagNewVersion() error {
-	// TODO:(jnelson) These should be configurable? Mon Sep 14 12:02:52 2015
-	tagName := fmt.Sprintf("v%s", r.newVersion.String())
+	tagName := fmt.Sprintf("%s%s", r.versionPrefix, r.newVersion.String())
 	if !r.prefix {
 		tagName = r.newVersion.String()
 	}

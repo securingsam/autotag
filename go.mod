@@ -1,4 +1,4 @@
-module github.com/pantheon-systems/autotag
+module github.com/ekirmayer/autotag
 
 go 1.12
 
