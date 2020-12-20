@@ -168,7 +168,8 @@ func NewRepo(cfg GitRepoConfig) (*GitRepo, error) {
 		prefix:                    cfg.Prefix,
 		versionPrefix:             cfg.VersionPrefix,
 	}
-	versionRex = regexp.MustCompile(fmt.Sprintf("^%s?([\\d]+\\.?.*)", r.versionPrefix))
+	log.Printf("Version prefix is: %s", r.versionPrefix)
+	versionRex = regexp.MustCompile(fmt.Sprintf("^%s([\\d]+\\.?.*)", r.versionPrefix))
 
 	err = r.parseTags()
 	if err != nil {
@@ -229,12 +230,12 @@ func (r *GitRepo) parseTags() error {
 	for tag, commit := range tags {
 		v, err := maybeVersionFromTag(commit)
 		if err != nil {
-			log.Println("skipping non version tag: ", tag)
+			log.Println("skipping non iversion tag: ", tag)
 			continue
 		}
 
 		if v == nil {
-			log.Println("skipping non version tag: ", tag)
+			log.Println("skipping non iversion tag: ", tag)
 			continue
 		}
 
@@ -245,6 +246,7 @@ func (r *GitRepo) parseTags() error {
 		versions[v] = c
 	}
 
+	log.Printf("Found %d versions", len(versions))
 	keys := make([]*version.Version, 0, len(versions))
 	for key := range versions {
 		keys = append(keys, key)
@@ -253,16 +255,17 @@ func (r *GitRepo) parseTags() error {
 
 	// loop over the tags and find the last reachable non pre-release tag,
 	// because we want to calculate the tag from v1.2.3 not v1.2.4-pre1.`
-	for _, version := range keys {
-		if len(version.Prerelease()) == 0 {
-			r.currentVersion = version
-			r.currentTag = versions[version]
+	for _, iversion := range keys {
+		if len(iversion.Prerelease()) == 0 {
+			r.currentVersion = iversion
+			r.currentTag = versions[iversion]
+			log.Printf("Version: %s, tag: %s", iversion, versions[iversion])
 			return nil
 		}
-		log.Printf("skipping pre-release tag version: %s", version.String())
+		log.Printf("skipping pre-release tag iversion: %s", iversion.String())
 	}
 
-	return fmt.Errorf("no stable (non pre-release) version tags found")
+	return fmt.Errorf("no stable (non pre-release) iversion tags found")
 
 }
 
@@ -281,12 +284,16 @@ func maybeVersionFromTag(tag string) (*version.Version, error) {
 // parseVersion returns a version object from a parsed string. This normalizes semver strings, and adds the ability to parse strings with 'v' leader. so that `v1.0.1`->     `1.0.1`  which we need for berkshelf to work
 func parseVersion(v string) (*version.Version, error) {
 	if versionRex.MatchString(v) {
+		log.Printf("Found matched version: %s", v)
 		m := versionRex.FindStringSubmatch(v)
+		log.Printf("Found sub match: %s", m)
 		if len(m) >= 2 {
 			v = m[1]
 		}
+	} else {
+		return nil, nil
 	}
-
+	log.Printf("Work on version: %s", v)
 	nVersion, err := version.NewVersion(v)
 	if err != nil && nVersion != nil && len(nVersion.Segments()) >= 1 {
 		return nVersion, err
