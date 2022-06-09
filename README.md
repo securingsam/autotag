@@ -91,6 +91,8 @@ tag and `HEAD` of the branch to determine how to increment the version.
 Commit messages are parsed for keywords via schemes. Schemes influence the tag selection according
 to a set of rules.
 
+Custom prefix: `short:"a" long:"version-prefix" description:"VersionPrefix to use" default:"v" `
+
 Schemes are specified using the `-s/--scheme` flag:
 
 ### Scheme: Autotag (default)
