@@ -9,7 +9,7 @@ require (
 	github.com/alecthomas/repr v0.0.0-20200325044227-4184120f674c // indirect
 	github.com/gogits/git-module v0.0.0-20190412001904-d1773fe06f37
 	github.com/gopherjs/gopherjs v0.0.0-20190430165422-3e4dfb77656c // indirect
-	github.com/hashicorp/go-version v1.2.0
+	github.com/hashicorp/go-version v1.7.0
 	github.com/jessevdk/go-flags v1.4.0
 	github.com/mattn/go-isatty v0.0.12 // indirect
 	github.com/mcuadros/go-version v0.0.0-20190308113854-92cdf37c5b75 // indirect
