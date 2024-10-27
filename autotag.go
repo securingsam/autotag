@@ -259,7 +259,7 @@ func (r *GitRepo) parseTags() error {
 		if len(iversion.Prerelease()) == 0 {
 			r.currentVersion = iversion
 			r.currentTag = versions[iversion]
-			log.Printf("Version: %s, tag: %s", iversion, versions[iversion])
+			log.Printf("Version: %s, tag: %v", iversion, versions[iversion])
 			return nil
 		}
 		log.Printf("skipping pre-release tag iversion: %s", iversion.String())
@@ -466,9 +466,9 @@ func (r *GitRepo) parseCommit(commit *git.Commit) (*version.Version, error) {
 
 // parseAutotagCommit implements the autotag (default) commit scheme.
 // A git commit message header containing:
-//  - [major] or #major: major version bump
-//  - [minor] or #minor: minor version bump
-//  - [patch] or #patch: patch version bump
+// - [major] or #major: major version bump
+// - [minor] or #minor: minor version bump
+// - [patch] or #patch: patch version bump
 // If no action is present nil is returned and the caller must decide what action to take.
 func parseAutotagCommit(msg string) bumper {
 	if majorRex.MatchString(msg) {

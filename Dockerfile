@@ -1,4 +1,4 @@
-FROM golang:1.15.6 as build
+FROM golang:1.23.2 AS build
 # Set the Current Working Directory inside the container
 WORKDIR $GOPATH/src/github.com/ekirmayer/autotag
 # Copy everything from the current directory to the PWD (Present Working Directory) inside the container
