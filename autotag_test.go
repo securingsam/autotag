@@ -2,11 +2,12 @@ package autotag
 
 import (
 	"fmt"
+	"os/exec"
 	"testing"
 	"time"
 
 	"github.com/alecthomas/assert"
-	"github.com/gogits/git-module"
+	"github.com/gogs/git-module"
 )
 
 func init() {
@@ -45,15 +46,18 @@ type testRepoSetup struct {
 	// (optional) commit message to use for the next, untagged commit. Settings this allows for testing the
 	// commit message parsing logic. eg: "#major this is a major commit"
 	nextCommit string
+
+	// (optional) Supply a list of commits to apply so you can test the logic between to possible tags wheere they may be more complex multiple bumps
+	commitList []string
 }
 
 // newTestRepo creates a new git repo in a temporary directory and returns an autotag.GitRepo struct for
 // testing the autotag package.
 // You must call cleanupTestRepo(t, r.repo) to remove the temporary directory after running tests.
 func newTestRepo(t *testing.T, setup testRepoSetup) GitRepo {
-	tr := createTestRepo(t)
+	tr := createTestRepo(t, setup.branch)
 
-	repo, err := git.OpenRepository(tr)
+	repo, err := git.Open(tr)
 	checkFatal(t, err)
 
 	branch := setup.branch
@@ -80,8 +84,14 @@ func newTestRepo(t *testing.T, setup testRepoSetup) GitRepo {
 		updateReadme(t, repo, setup.nextCommit)
 	}
 
+	if len(setup.commitList) != 0 {
+		for _, c := range setup.commitList {
+			updateReadme(t, repo, c)
+		}
+	}
+
 	r, err := NewRepo(GitRepoConfig{
-		RepoPath:                  repo.Path,
+		RepoPath:                  repo.Path(),
 		Branch:                    branch,
 		PreReleaseName:            setup.preReleaseName,
 		PreReleaseTimestampLayout: setup.preReleaseTimestampLayout,
@@ -103,11 +113,6 @@ func TestValidateConfig(t *testing.T) {
 		cfg       GitRepoConfig
 		shouldErr bool
 	}{
-		{
-			name:      "missing branch",
-			cfg:       GitRepoConfig{},
-			shouldErr: true,
-		},
 		{
 			name: "invalid build metadata",
 			cfg: GitRepoConfig{
@@ -173,8 +178,118 @@ func TestValidateConfig(t *testing.T) {
 	}
 }
 
+func TestNewRepo(t *testing.T) {
+	var newRepoTests = []struct {
+		createBranch  string
+		requestBranch string
+		expectBranch  string
+	}{
+		{"main", "main", "main"},
+		{"main", "", "main"},
+		{"master", "master", "master"},
+		{"master", "", "master"},
+	}
+
+	for _, tt := range newRepoTests {
+		tr := createTestRepo(t, tt.createBranch)
+
+		repo, err := git.Open(tr)
+		checkFatal(t, err)
+
+		tag := "v0.0.1"
+		seedTestRepo(t, tag, repo)
+
+		r, err := NewRepo(GitRepoConfig{
+			Branch:   tt.requestBranch,
+			RepoPath: repo.Path(),
+		})
+
+		if err != nil {
+			t.Fatal("Error creating repo: ", err)
+		}
+
+		if r.branch != tt.expectBranch {
+			t.Fatalf("Expected branch %s, got [%s]", tt.expectBranch, r.branch)
+		}
+	}
+}
+
+func TestNewRepoMainAndMaster(t *testing.T) {
+	// create repo w/"master" branch
+	tr := createTestRepo(t, "master")
+
+	repo, err := git.Open(tr)
+	checkFatal(t, err)
+
+	seedTestRepo(t, "v0.0.1", repo)
+
+	// also create "main" branch
+	f := repoRoot(repo) + "/main"
+	err = exec.Command("touch", f).Run()
+	if err != nil {
+		fmt.Println("FAILED to touch the file ", f, err)
+		checkFatal(t, err)
+	}
+
+	cmd := exec.Command("git", "checkout", "-b", "main")
+	cmd.Dir = repoRoot(repo)
+	err = cmd.Run()
+	if err != nil {
+		fmt.Println("FAILED to create/checkout main branch", err)
+		checkFatal(t, err)
+	}
+
+	makeCommit(repo, "this is a commit on main")
+	makeTag(repo, "v0.2.1")
+
+	// check results
+	var newRepoTests = []struct {
+		requestBranch string
+		expectBranch  string
+	}{
+		{"main", "main"},
+		{"master", "master"},
+		{"", "main"},
+	}
+
+	for _, tt := range newRepoTests {
+		r, err := NewRepo(GitRepoConfig{
+			Branch:   tt.requestBranch,
+			RepoPath: repo.Path(),
+		})
+
+		if err != nil {
+			t.Fatal("Error creating repo: ", err)
+		}
+
+		if r.branch != tt.expectBranch {
+			t.Fatalf("Expected branch %s, got [%s]", tt.expectBranch, r.branch)
+		}
+	}
+}
+
 func TestMajor(t *testing.T) {
 	r := newTestRepo(t, testRepoSetup{
+		branch:     "master",
+		initialTag: "v1.0.1",
+	})
+	defer cleanupTestRepo(t, r.repo)
+
+	v, err := r.MajorBump()
+	if err != nil {
+		t.Fatal("MajorBump failed: ", err)
+	}
+
+	if v.String() != "2.0.0" {
+		t.Fatalf("MajorBump failed expected '2.0.0' got '%s' ", v)
+	}
+
+	fmt.Printf("Major is now %s\n", v)
+}
+
+func TestMajorWithMain(t *testing.T) {
+	r := newTestRepo(t, testRepoSetup{
+		branch:     "main",
 		initialTag: "v1.0.1",
 	})
 	defer cleanupTestRepo(t, r.repo)
@@ -224,15 +339,15 @@ func TestPatch(t *testing.T) {
 }
 
 func TestMissingInitialTag(t *testing.T) {
-	tr := createTestRepo(t)
-	repo, err := git.OpenRepository(tr)
+	tr := createTestRepo(t, "")
+	repo, err := git.Open(tr)
 	checkFatal(t, err)
 	defer cleanupTestRepo(t, repo)
 
 	updateReadme(t, repo, "a commit before any usable tag has been created")
 
 	_, err = NewRepo(GitRepoConfig{
-		RepoPath: repo.Path,
+		RepoPath: repo.Path(),
 		Branch:   "master",
 	})
 	assert.Error(t, err)
@@ -372,6 +487,48 @@ func TestAutoTag(t *testing.T) {
 			},
 			expectedTag: "2.0.0",
 		},
+		{
+			name: "autotag scheme, Bump with Major with interstitial minor changes",
+			setup: testRepoSetup{
+				scheme:        "autotag",
+				initialTag:    "1.0.0",
+				disablePrefix: true,
+				commitList: []string{
+					"#patch: thing 1",
+					"[minor]: break thing 1",
+					"feat: thing 2",
+					"[major]: drop support for Node 6",
+				},
+			},
+			expectedTag: "2.0.0",
+		},
+		{
+			name: "autotag scheme, Bump with Major between minor changes",
+			setup: testRepoSetup{
+				scheme:        "autotag",
+				initialTag:    "1.0.0",
+				disablePrefix: true,
+				commitList: []string{
+					"[minor]: thing 1",
+					"[major]: drop support for Node 6",
+					"[minor]: thing 2",
+				},
+			},
+			expectedTag: "2.0.0",
+		},
+		{
+			name: "autotag scheme, version comparison is not lexicographic",
+			setup: testRepoSetup{
+				scheme:     "autotag",
+				initialTag: "v0.9.0",
+				commitList: []string{
+					"[minor]: thing 1",
+					"[minor]: thing 2",
+				},
+			},
+			expectedTag: "v0.10.0",
+		},
+
 		// tests for conventional commits scheme. Based on:
 		// https://www.conventionalcommits.org/en/v1.0.0/#summary
 		// and
@@ -439,6 +596,45 @@ func TestAutoTag(t *testing.T) {
 			},
 			expectedTag: "v1.0.1",
 		},
+		{
+			name: "conventional commits, breaking change with minor interstitial commits",
+			setup: testRepoSetup{
+				scheme: "conventional",
+				commitList: []string{
+					"feat: thing 1",
+					"feat!: break thing 1",
+					"feat: thing 2",
+					"refactor(runtime)!: drop support for Node 6",
+				},
+				initialTag: "v1.0.0",
+			},
+			expectedTag: "v2.0.0",
+		},
+		{
+			name: "conventional commits, breaking change between minor commits",
+			setup: testRepoSetup{
+				scheme: "conventional",
+				commitList: []string{
+					"feat: thing 1",
+					"feat!: break thing 1",
+					"feat: thing 2",
+				},
+				initialTag: "v1.0.0",
+			},
+			expectedTag: "v2.0.0",
+		},
+		{
+			name: "conventional commits, version comparison is not lexicographic",
+			setup: testRepoSetup{
+				scheme: "conventional",
+				commitList: []string{
+					"feat: thing 1",
+					"feat: thing 2",
+				},
+				initialTag: "v0.9.0",
+			},
+			expectedTag: "v0.10.0",
+		},
 	}
 
 	for _, tc := range tests {
@@ -453,7 +649,7 @@ func TestAutoTag(t *testing.T) {
 				assert.NoError(t, err)
 			}
 
-			tags, err := r.repo.GetTags()
+			tags, err := r.repo.Tags()
 			checkFatal(t, err)
 			assert.Contains(t, tags, tc.expectedTag)
 		})

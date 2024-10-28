@@ -14,7 +14,7 @@ import (
 type Options struct {
 	JustVersion         bool   `short:"n" description:"Just output the next version, don't autotag"`
 	Verbose             bool   `short:"v" description:"Enable verbose logging"`
-	Branch              string `short:"b" long:"branch" description:"Git branch to scan" default:"master" `
+	Branch              string `short:"b" long:"branch" description:"Git branch to scan (defaults to main, then master)" default:""`
 	RepoPath            string `short:"r" long:"repo" description:"Path to the repo" default:"./" `
 	PreReleaseName      string `short:"p" long:"pre-release-name" description:"create a pre-release tag"`
 	PreReleaseTimestamp string `short:"T" long:"pre-release-timestamp" description:"create a pre-release tag and append a timestamp (can be: datetime|epoch)"`
@@ -50,9 +50,9 @@ func main() {
 		Prefix:                    !opts.NoVersionPrefix,
 		VersionPrefix:             opts.VersionPrefix,
 	})
-
 	if err != nil {
-		fmt.Println("Error initializing: ", err)
+		log.SetOutput(os.Stderr)
+		log.Println("Error initializing: " + err.Error())
 		os.Exit(1)
 	}
 
@@ -60,7 +60,8 @@ func main() {
 	if !opts.JustVersion {
 		err = r.AutoTag()
 		if err != nil {
-			fmt.Println("Error auto updating version: ", err.Error())
+			log.SetOutput(os.Stderr)
+			log.Println("Error auto updating version: " + err.Error())
 			os.Exit(1)
 		}
 	}

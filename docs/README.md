@@ -1,9 +1,10 @@
 AutoTag
 =======
 
-[![Circle CI](https://circleci.com/gh/pantheon-systems/autotag.svg?style=shield&circle-token=ef9a68c180d0d470c594d39caf9e2a86fc529935)](https://circleci.com/gh/pantheon-systems/autotag)
-[![Coverage Status](https://coveralls.io/repos/github/pantheon-systems/autotag/badge.svg?branch=master)](https://coveralls.io/github/pantheon-systems/autotag?branch=master)
+[![CI](https://github.com/pantheon-systems/autotag/actions/workflows/workflow.yml/badge.svg)](https://github.com/pantheon-systems/autotag/actions/workflows/workflow.yml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/pantheon-systems/autotag)](https://goreportcard.com/report/github.com/pantheon-systems/autotag)
+[![Actively Maintained](https://img.shields.io/badge/Pantheon-Actively_Maintained-yellow?logo=pantheon&color=FFDC28)](https://pantheon.io/docs/oss-support-levels#actively-maintained-support)
+
 
 Automatically increment version tags to a git repo based on commit messages.
 
@@ -80,10 +81,10 @@ Usage
 The `autotag` utility will use the current state of the git repository to determine what the next
 tag should be and then creates the tag by executing `git tag`. The `-n` flag will print the next tag but not apply it.
 
-`autotag` scans the `master` branch for commits by default. Use `-b/--branch` to scan a different
-branch. The utility first looks to find the most-recent reachable tag that matches a supported
-versioning scheme. If no tags can be found the utility bails-out, so you do need to create a
-`v0.0.0` tag before using `autotag`.
+`autotag` scans the `main` branch for commits by default. If no `main` branch is found, it will
+fall back to the `master` branch.  Use `-b/--branch` to scan a different branch. The utility first
+looks to find the most-recent reachable tag that matches a supported versioning scheme. If no tags
+can be found the utility bails-out, so you do need to create a `v0.0.0` tag before using `autotag`.
 
 Once the last reachable tag has been found, the `autotag` utility inspects each commit between the
 tag and `HEAD` of the branch to determine how to increment the version.

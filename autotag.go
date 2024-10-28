@@ -5,15 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
-	"regexp"
-
-	"github.com/gogits/git-module"
+	"github.com/gogs/git-module"
 	"github.com/hashicorp/go-version"
 )
 
@@ -147,15 +147,41 @@ func NewRepo(cfg GitRepoConfig) (*GitRepo, error) {
 	}
 
 	gitDirPath, err := generateGitDirPath(cfg.RepoPath)
-
 	if err != nil {
 		return nil, err
 	}
 
+	if _, err := os.Stat(gitDirPath); os.IsNotExist(err) {
+		return nil, err
+	}
+
 	log.Println("Opening repo at", gitDirPath)
-	repo, err := git.OpenRepository(gitDirPath)
+	repo, err := git.Open(gitDirPath)
 	if err != nil {
 		return nil, err
+	}
+
+	if cfg.Branch == "" {
+		branches, err := repo.Branches()
+		if err != nil {
+			return nil, err
+		}
+
+		// Locate main or master branch.
+		// If main is found, stop searching and use it.
+		// If master is found first, store it, but keep searching for main.
+		for _, b := range branches {
+			if b == "main" {
+				cfg.Branch = "main"
+				break
+			}
+			if b == "master" {
+				cfg.Branch = "master"
+			}
+		}
+		if cfg.Branch == "" {
+			return nil, fmt.Errorf("no main or master branch found")
+		}
 	}
 
 	r := &GitRepo{
@@ -184,10 +210,6 @@ func NewRepo(cfg GitRepoConfig) (*GitRepo, error) {
 }
 
 func validateConfig(cfg GitRepoConfig) error {
-	if cfg.Branch == "" {
-		return fmt.Errorf("must specify a branch")
-	}
-
 	if cfg.BuildMetadata != "" && !validateSemVerBuildMetadata(cfg.BuildMetadata) {
 		return fmt.Errorf("'%s' is not valid SemVer build metadata", cfg.BuildMetadata)
 	}
@@ -208,7 +230,6 @@ func validateConfig(cfg GitRepoConfig) error {
 
 func generateGitDirPath(repoPath string) (string, error) {
 	absolutePath, err := filepath.Abs(repoPath)
-
 	if err != nil {
 		return "", err
 	}
@@ -222,7 +243,7 @@ func (r *GitRepo) parseTags() error {
 
 	versions := make(map[*version.Version]*git.Commit)
 
-	tags, err := r.repo.GetTags()
+	tags, err := r.repo.Tags()
 	if err != nil {
 		return fmt.Errorf("failed to fetch tags: %s", err.Error())
 	}
@@ -239,7 +260,7 @@ func (r *GitRepo) parseTags() error {
 			continue
 		}
 
-		c, err := r.repo.GetCommit(commit)
+		c, err := r.repo.CommitByRevision(commit)
 		if err != nil {
 			return fmt.Errorf("error reading commit '%s':  %s", commit, err)
 		}
@@ -265,8 +286,7 @@ func (r *GitRepo) parseTags() error {
 		log.Printf("skipping pre-release tag iversion: %s", iversion.String())
 	}
 
-	return fmt.Errorf("no stable (non pre-release) iversion tags found")
-
+	return fmt.Errorf("no stable (non pre-release) version tags found")
 }
 
 func maybeVersionFromTag(tag string) (*version.Version, error) {
@@ -308,7 +328,7 @@ func (r *GitRepo) LatestVersion() string {
 }
 
 func (r *GitRepo) retrieveBranchInfo() error {
-	id, err := r.repo.GetBranchCommitID(r.branch)
+	id, err := r.repo.BranchCommitID(r.branch)
 	if err != nil {
 		return fmt.Errorf("error getting head commit: %s ", err.Error())
 	}
@@ -371,37 +391,40 @@ func (r *GitRepo) calcVersion() error {
 		return err
 	}
 
-	startCommit, err := r.repo.GetBranchCommit(r.branch)
+	startCommit, err := r.repo.BranchCommit(r.branch)
 	if err != nil {
 		return err
 	}
 
-	l, err := r.repo.CommitsBetween(startCommit, r.currentTag)
+	revList := []string{fmt.Sprintf("%s..%s", r.currentTag.ID, startCommit.ID)}
+
+	l, err := r.repo.RevList(revList)
 	if err != nil {
 		log.Printf("Error loading history for tag '%s': %s ", r.currentVersion, err.Error())
 	}
+
+	// r.branchID is newest commit; r.currentTag.ID is oldest
 	log.Printf("Checking commits from %s to %s ", r.branchID, r.currentTag.ID)
 
-	// Sort the commits oldest to newest. Then process each commit for bumper commands.
-	for e := l.Back(); e != nil; e = e.Prev() {
-		commit := e.Value.(*git.Commit)
+	// Revlist returns in reverse Crhonological We want chonological. Then check each commit for bump messages
+	for i := len(l) - 1; i >= 0; i-- {
+		commit := l[i] // getting the reverse order element
 		if commit == nil {
-			return fmt.Errorf("commit pointed to nil object. This should not happen: %v", e)
+			return fmt.Errorf("commit pointed to nil object. This should not happen.")
 		}
 
 		v, nerr := r.parseCommit(commit)
 		if nerr != nil {
-			log.Fatal(err)
+			log.Fatal(nerr)
 		}
 
-		if v != nil {
+		if v != nil && v.GreaterThan(r.newVersion) {
 			r.newVersion = v
 		}
-
 	}
 
 	// if there is no movement on the version from commits, bump patch
-	if r.newVersion == r.currentVersion {
+	if r.newVersion.Equal(r.currentVersion) {
 		if r.newVersion, err = patchBumper.bump(r.currentVersion); err != nil {
 			return err
 		}
@@ -446,7 +469,7 @@ func (r *GitRepo) tagNewVersion() error {
 // parseCommit looks at HEAD commit see if we want to increment major/minor/patch
 func (r *GitRepo) parseCommit(commit *git.Commit) (*version.Version, error) {
 	var b bumper
-	msg := commit.Message()
+	msg := commit.Message
 	log.Printf("Parsing %s: %s\n", commit.ID, msg)
 
 	switch r.scheme {
@@ -466,9 +489,10 @@ func (r *GitRepo) parseCommit(commit *git.Commit) (*version.Version, error) {
 
 // parseAutotagCommit implements the autotag (default) commit scheme.
 // A git commit message header containing:
-// - [major] or #major: major version bump
-// - [minor] or #minor: minor version bump
-// - [patch] or #patch: patch version bump
+//   - [major] or #major: major version bump
+//   - [minor] or #minor: minor version bump
+//   - [patch] or #patch: patch version bump
+//
 // If no action is present nil is returned and the caller must decide what action to take.
 func parseAutotagCommit(msg string) bumper {
 	if majorRex.MatchString(msg) {
@@ -529,7 +553,7 @@ func (r *GitRepo) PatchBump() (*version.Version, error) {
 	return patchBumper.bump(r.currentVersion)
 }
 
-// findNamedMatches is a helper functiong for use with regexes containing named capture groups.
+// findNamedMatches is a helper function for use with regexes containing named capture groups.
 // It takes a regex and a string and returns a map with keys corresponding to the named captures
 // in the regex. If there are no matches the map will be empty.
 // https://play.golang.org/p/GR_6YHaEvef

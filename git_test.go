@@ -9,7 +9,7 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/gogits/git-module"
+	"github.com/gogs/git-module"
 )
 
 func checkFatal(t *testing.T, err error) {
@@ -25,23 +25,27 @@ func checkFatal(t *testing.T, err error) {
 	t.Fatalf("Fail at %v:%v; %v", file, line, err)
 }
 
-func createTestRepo(t *testing.T) string {
+func createTestRepo(t *testing.T, branch string) string {
 	// figure out where we can create the test repo
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "autoTagTest")
-	// path, err := os.TempDir("", "autoTagTest")
-	// checkFatal(t, err)
 
-	err := os.MkdirAll(path, 0777)
-	checkFatal(t, err)
-
-	err = exec.Command("git", "init", path).Run()
+	err := exec.Command("git", "init", path).Run()
 	if err != nil {
 		checkFatal(t, err)
 	}
 
+	// using two-step init / checkout -b to change default branch,
+	// as opposed to init.defaultBranch, which would require Git 2.28+
+	if branch != "" {
+		err := exec.Command("git", "--git-dir="+path+"/.git", "checkout", "-b", branch).Run()
+		if err != nil {
+			checkFatal(t, err)
+		}
+	}
+
 	tmpfile := "README"
-	err = os.WriteFile(path+"/"+tmpfile, []byte("foo\n"), 0644)
+	err = os.WriteFile(path+"/"+tmpfile, []byte("foo\n"), 0o644)
 	checkFatal(t, err)
 
 	return path
@@ -99,16 +103,16 @@ func seedTestRepo(t *testing.T, tag string, repo *git.Repository) {
 
 func updateReadme(t *testing.T, repo *git.Repository, content string) {
 	tmpfile := repoRoot(repo) + "/README"
-	err := os.WriteFile(tmpfile, []byte(content), 0644)
+	err := os.WriteFile(tmpfile, []byte(content), 0o644)
 	checkFatal(t, err)
 
 	makeCommit(repo, content)
 }
 
 func repoRoot(r *git.Repository) string {
-	checkPath := r.Path
-	if filepath.Base(r.Path) == ".git" {
-		checkPath = r.Path + "/../"
+	checkPath := r.Path()
+	if filepath.Base(checkPath) == ".git" {
+		checkPath = checkPath + "/../"
 	}
 
 	p, err := filepath.Abs(checkPath)
